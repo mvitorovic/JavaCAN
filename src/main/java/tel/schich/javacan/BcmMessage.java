@@ -32,9 +32,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import lombok.Builder;
-import lombok.NonNull;
-import lombok.Singular;
 import tel.schich.javacan.util.BufferHelper;
 
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
@@ -135,51 +132,6 @@ public class BcmMessage {
     }
 
     /**
-     * This all-args-constructor enables the builder pattern.
-     *
-     * @param opcode see {@link #getOpcode()}
-     * @param flags see {@link #getFlags()}
-     * @param count see {@link #getCount()}
-     * @param interval1 see {@link #getInterval1()}
-     * @param interval2 see {@link #getInterval2()}
-     * @param canId see {@link #getCanId()}
-     * @param frames see {@link #getFrames()}
-     */
-    @Builder
-    private BcmMessage(@NonNull BcmOpcode opcode, @Singular Set<BcmFlag> flags, int count, Duration interval1,
-            Duration interval2, int canId, @Singular List<CanFrame> frames) {
-        boolean fdFrames = frames.stream().anyMatch(CanFrame::isFDFrame);
-        if (fdFrames && !flags.contains(BcmFlag.CAN_FD_FRAME)) {
-            flags = new HashSet<>(flags); // the set from the builder is immutable
-            flags.add(BcmFlag.CAN_FD_FRAME);
-        }
-        int frameLength = frameLength(flags);
-        base = 0;
-        size = HEADER_LENGTH + frames.size() * frameLength;
-        buffer = ByteBuffer.allocateDirect(size);
-
-        buffer.order(ByteOrder.nativeOrder())
-                .putInt(OFFSET_OPCODE, opcode.nativeOpcode)
-                .putInt(OFFSET_FLAGS, BcmFlag.toNative(flags))
-                .putInt(OFFSET_COUNT, count)
-                .putInt(OFFSET_CAN_ID, canId)
-                .putInt(OFFSET_NFRAMES, frames.size());
-        if (interval1 != null) {
-            putPlatformLong(buffer, OFFSET_IVAL1_TV_SEC, interval1.getSeconds());
-            putPlatformLong(buffer, OFFSET_IVAL1_TV_USEC, TimeUnit.NANOSECONDS.toMicros(interval1.getNano()));
-        }
-        if (interval2 != null) {
-            putPlatformLong(buffer, OFFSET_IVAL2_TV_SEC, interval2.getSeconds());
-            putPlatformLong(buffer, OFFSET_IVAL2_TV_USEC, TimeUnit.NANOSECONDS.toMicros(interval2.getNano()));
-        }
-        for (int i = 0; i < frames.size(); i++) {
-            buffer.position(OFFSET_FRAMES + i * frameLength);
-            buffer.put(frames.get(i).getBuffer());
-        }
-        buffer.clear();
-    }
-
-    /**
      * Returns the OP-code of this message.
      *
      * @return the opcode
@@ -206,15 +158,14 @@ public class BcmMessage {
         return buffer.getInt(base + OFFSET_COUNT);
     }
 
-    /*
+    /**
      * The {@code interval1} has different meanings depending on the {@link #getOpcode()} of the
      * message:
      * <ul>
      * <li><strong>When used with {@link BcmOpcode#TX_SETUP}</strong>:<br>
      * The broadcast manager sends {@link #getCount()} messages with this interval, then continue to
      * send at {@link #getInterval2()}. If only one timer is needed set
-     * {@link BcmMessageBuilder#count(int) count} to {@code 0} and {@link BcmMessageBuilder#ival1
-     * interval1} to {@code null}.</li>
+     * {@code count} to {@code 0} and {@code interval1} to {@code null}.</li>
      * <li><strong>When used with {@link BcmOpcode#RX_SETUP}</strong>:<br>
      * Send {@link BcmOpcode#RX_TIMEOUT} when a received message is not received again within the given
      * interval. When {@link BcmFlag#STARTTIMER} is set, the timeout detection is activated directly -
@@ -381,4 +332,50 @@ public class BcmMessage {
     private static native int getOffsetNFrames();
 
     private static native int getOffsetFrames();
+
+    /**
+     * This all-args-constructor enables the builder pattern.
+     *
+     * @param opcode see {@link #getOpcode()}
+     * @param flags see {@link #getFlags()}
+     * @param count see {@link #getCount()}
+     * @param interval1 see {@link #getInterval1()}
+     * @param interval2 see {@link #getInterval2()}
+     * @param canId see {@link #getCanId()}
+     * @param frames see {@link #getFrames()}
+     * @return new BCM message instance backed by a direct ByteBuffer
+     */
+    public static BcmMessage create(BcmOpcode opcode, Set<BcmFlag> flags, int count, Duration interval1, Duration interval2, int canId, List<CanFrame> frames) {
+        boolean fdFrames = frames.stream().anyMatch(CanFrame::isFDFrame);
+        if (fdFrames && !flags.contains(BcmFlag.CAN_FD_FRAME)) {
+            flags = new HashSet<>(flags); // the set from the builder is immutable
+            flags.add(BcmFlag.CAN_FD_FRAME);
+        }
+        int frameLength = frameLength(flags);
+        final int size = HEADER_LENGTH + frames.size() * frameLength;
+        final ByteBuffer buffer = ByteBuffer.allocateDirect(size);
+
+        buffer.order(ByteOrder.nativeOrder())
+                .putInt(OFFSET_OPCODE, opcode.nativeOpcode)
+                .putInt(OFFSET_FLAGS, BcmFlag.toNative(flags))
+                .putInt(OFFSET_COUNT, count)
+                .putInt(OFFSET_CAN_ID, canId)
+                .putInt(OFFSET_NFRAMES, frames.size());
+        putInterval(buffer, interval1, OFFSET_IVAL1_TV_SEC, OFFSET_IVAL1_TV_USEC);
+        putInterval(buffer, interval2, OFFSET_IVAL2_TV_SEC, OFFSET_IVAL2_TV_USEC);
+        for (int i = 0; i < frames.size(); i++) {
+            buffer.position(OFFSET_FRAMES + i * frameLength);
+            buffer.put(frames.get(i).getBuffer());
+        }
+        buffer.clear();
+
+        return new BcmMessage(buffer);
+    }
+
+    private static void putInterval(ByteBuffer buffer, Duration interval, int secOffset, int usecOffset) {
+        if (interval != null) {
+            putPlatformLong(buffer, secOffset, interval.getSeconds());
+            putPlatformLong(buffer, usecOffset, TimeUnit.NANOSECONDS.toMicros(interval.getNano()));
+        }
+    }
 }

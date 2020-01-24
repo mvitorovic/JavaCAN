@@ -27,18 +27,14 @@ import java.nio.ByteOrder;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import tel.schich.javacan.BcmCanChannel;
-import tel.schich.javacan.BcmFlag;
-import tel.schich.javacan.BcmMessage;
-import tel.schich.javacan.BcmOpcode;
-import tel.schich.javacan.CanChannels;
-import tel.schich.javacan.CanFrame;
-import tel.schich.javacan.RawCanChannel;
+import tel.schich.javacan.*;
 import tel.schich.javacan.linux.LinuxNativeOperationException;
 
+import static java.util.Collections.singletonList;
 import static org.junit.jupiter.api.Assertions.*;
 import static tel.schich.javacan.CanFrame.FD_NO_FLAGS;
 import static tel.schich.javacan.CanSocketOptions.SO_RCVTIMEO;
@@ -93,13 +89,12 @@ class BcmCanSocketTest {
                 new byte[] { 3, 4, 5 },
                 new byte[] { 6, 7, 8, 9 },
         };
-        BcmMessage message = BcmMessage.builder()
-                .opcode(BcmOpcode.TX_SETUP)
-                .frame(CanFrame.create(0, (byte) 0, frameData[0]))
-                .frame(CanFrame.create(0, (byte) 0, frameData[1]))
-                .frame(CanFrame.create(0, (byte) 0, frameData[2]))
-                .build();
-
+        List<CanFrame> frames = Arrays.asList(
+                CanFrame.create(0, (byte) 0, frameData[0]),
+                CanFrame.create(0, (byte) 0, frameData[1]),
+                CanFrame.create(0, (byte) 0, frameData[2])
+        );
+        BcmMessage message = BcmMessages.createSetupMessage(frames);
         Iterator<CanFrame> frameIterator = message.getFrames().iterator();
         // check all frames access
         for (byte[] expectedData : frameData) {
@@ -129,13 +124,12 @@ class BcmCanSocketTest {
                 new byte[] { 6, 7, 8, 9 },
         };
         int expectedBufferSize = BcmMessage.HEADER_LENGTH + frameData.length * RawCanChannel.FD_MTU;
-        BcmMessage message = BcmMessage.builder()
-                .opcode(BcmOpcode.TX_SETUP)
-                .frame(CanFrame.create(0, (byte) 0, frameData[0]))
-                .frame(CanFrame.create(0, (byte) 0, frameData[1]))
-                .frame(CanFrame.create(0, (byte) 0, frameData[2]))
-                .build();
-
+        List<CanFrame> frames = Arrays.asList(
+                CanFrame.create(0, (byte) 0, frameData[0]),
+                CanFrame.create(0, (byte) 0, frameData[1]),
+                CanFrame.create(0, (byte) 0, frameData[2])
+        );
+        BcmMessage message = BcmMessages.createSetupMessage(frames);
         assertEquals(expectedBufferSize, message.getBuffer().remaining());
         assertTrue(message.getFlags().contains(BcmFlag.CAN_FD_FRAME));
 
@@ -164,15 +158,12 @@ class BcmCanSocketTest {
     void testNonBlockingRead() throws Exception {
         Duration timeout = Duration.ofSeconds(1);
         int canId = 0x7EA;
-        BcmMessage rxFilterSetupMessage = BcmMessage.builder()
-                .opcode(BcmOpcode.RX_SETUP)
-                .canId(canId)
-                .flag(BcmFlag.SETTIMER).flag(BcmFlag.RX_ANNOUNCE_RESUME)
-                .interval1(timeout)
-                .frame(CanFrame.create(canId, (byte) 0, new byte[] {
-                        (byte) 0xff, (byte) 0xff, (byte) 0xff
-                }))
-                .build();
+        List<CanFrame> frames = singletonList(CanFrame.create(canId, (byte) 0, new byte[]{
+                (byte) 0xff, (byte) 0xff, (byte) 0xff
+        }));
+        // double timeout on BCM, so we can test whether the read times out before the
+        // RX_TIMEOUT message arrives
+        BcmMessage rxFilterSetupMessage = BcmMessages.createSetupMessage(canId, timeout.multipliedBy(2), frames);
         CanFrame input = CanFrame.create(canId, FD_NO_FLAGS, new byte[] { 0x34, 0x52, 0x34 });
         try (final BcmCanChannel channel = CanChannels.newBcmChannel()) {
             channel.connect(CAN_INTERFACE);
@@ -199,17 +190,12 @@ class BcmCanSocketTest {
     void testBlockingRead() throws Exception {
         Duration timeout = Duration.ofSeconds(1);
         int canId = 0x7EA;
-        BcmMessage rxFilterSetupMessage = BcmMessage.builder()
-                .opcode(BcmOpcode.RX_SETUP)
-                .canId(canId)
-                .flag(BcmFlag.SETTIMER).flag(BcmFlag.RX_ANNOUNCE_RESUME)
-                // double timeout on BCM, so we can test whether the read times out before the
-                // RX_TIMEOUT message arrives
-                .interval1(timeout.plus(timeout))
-                .frame(CanFrame.create(canId, (byte) 0, new byte[] {
-                        (byte) 0xff, (byte) 0xff, (byte) 0xff
-                }))
-                .build();
+        List<CanFrame> frames = singletonList(CanFrame.create(canId, (byte) 0, new byte[]{
+                (byte) 0xff, (byte) 0xff, (byte) 0xff
+        }));
+        // double timeout on BCM, so we can test whether the read times out before the
+        // RX_TIMEOUT message arrives
+        BcmMessage rxFilterSetupMessage = BcmMessages.createSetupMessage(canId, timeout.multipliedBy(2), frames);
         CanFrame input = CanFrame.create(canId, FD_NO_FLAGS, new byte[] { 0x34, 0x52, 0x34 });
         try (final BcmCanChannel channel = CanChannels.newBcmChannel()) {
             channel.connect(CAN_INTERFACE);
